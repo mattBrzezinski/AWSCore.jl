@@ -19,11 +19,8 @@ message.
 """
 mime_multipart(parts::Array) = mime_multipart("", parts::Vector{Part})
 
-
 function mime_multipart(header::AbstractString, parts::Vector{Part})
-
     boundary = "=PRZLn8Nm1I82df0Dtj4ZvJi="
-
     mime =
     """
     MIME-Version: 1.0
@@ -33,7 +30,6 @@ function mime_multipart(header::AbstractString, parts::Vector{Part})
     """
 
     for (filename, content_type, content) in parts
-
         mime *= "--$boundary\n"
 
         if filename != ""
@@ -58,9 +54,3 @@ function mime_multipart(header::AbstractString, parts::Vector{Part})
     mime *= "--$boundary--\n"
     return mime
 end
-
-
-
-#==============================================================================#
-# End of file
-#==============================================================================#

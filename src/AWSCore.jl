@@ -4,12 +4,9 @@
 # Copyright OC Technology Pty Ltd 2014 - All rights reserved
 #==============================================================================#
 
-
 module AWSCore
 
-
-export AWSException, AWSConfig, AWSRequest,
-       aws_config, default_aws_config
+export AWSException, AWSConfig, AWSRequest, aws_config, default_aws_config, SignatureV4
 
 using Base64
 using Dates
@@ -21,7 +18,6 @@ using HTTP
 using DataStructures: OrderedDict
 using JSON
 using LazyJSON
-
 
 """
 Most `AWSCore` functions take a `AWSConfig` dictionary as the first argument.
@@ -55,8 +51,11 @@ include("AWSException.jl")
 include("AWSCredentials.jl")
 include("names.jl")
 include("mime.jl")
+include("signaturev4.jl")
+include("sign.jl")
+include("Services.jl")
 
-
+global _default_aws_config = nothing # Union{AWSConfig,Nothing}
 
 #------------------------------------------------------------------------------#
 # Configuration.
@@ -75,7 +74,7 @@ The `aws_config` function provides a simple way to creates an
 
 By default, the `aws_config` attempts to load AWS credentials from:
 
- - `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` [environemnt variables](http://docs.aws.amazon.com/cli/latest/userguide/cli-environment.html),
+ - `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` [environment variables](http://docs.aws.amazon.com/cli/latest/userguide/cli-environment.html),
  - [`~/.aws/credentials`](http://docs.aws.amazon.com/cli/latest/userguide/cli-config-files.html) or
  - [EC2 Instance Credentials](http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html#instance-metadata-security-credentials).
 
@@ -112,11 +111,8 @@ function aws_config(;profile=nothing,
                      creds=AWSCredentials(profile=profile),
                      region=get(ENV, "AWS_DEFAULT_REGION", "us-east-1"),
                      args...)
-    @SymDict(creds, region, args...)
+    return @SymDict(creds, region, args...)
 end
-
-
-global _default_aws_config = nothing # Union{AWSConfig,Nothing}
 
 
 """
@@ -125,9 +121,11 @@ obtained by calling [`aws_config`](@ref) with no optional arguments.
 """
 function default_aws_config()
     global _default_aws_config
+
     if _default_aws_config === nothing
         _default_aws_config = aws_config()
     end
+
     return _default_aws_config
 end
 
@@ -138,11 +136,8 @@ end
 Convert nested `Vector{Pair}` maps in `args` into `Dict{String,Any}` maps.
 """
 function aws_args_dict(args)
-
     result = stringdict(args)
-
-    dictlike(t) = (t <: AbstractDict
-                || t <: Vector && t.parameters[1] <: Pair{String})
+    dictlike(t) = (t <: AbstractDict || t <: Vector && t.parameters[1] <: Pair{String})
 
     for (k, v) in result
         if dictlike(typeof(v))
@@ -155,27 +150,20 @@ function aws_args_dict(args)
     return result
 end
 
-
 # FIXME handle map.flattened and list.flattened (see SQS and SDB)
 """
     flatten_query(service, query, prefix="")
 
-Recursivly flatten tree of `Dicts` and `Arrays` into a 1-level deep Dict.
+Recursively flatten tree of `Dicts` and `Arrays` into a 1-level deep Dict.
 """
 function flatten_query(service, query, prefix="")
-
     result = Dict{String,String}()
 
     for (k, v) in query
-
         if typeof(v) <: AbstractDict
-
             merge!(result, flatten_query(service, v, "$prefix$k."))
-
         elseif typeof(v) <: Array
-
             for (i, x) in enumerate(v)
-
                 suffix = service in ["ec2", "sqs"] ? "" : ".member"
                 pk = "$prefix$k$suffix.$i"
 
@@ -202,11 +190,12 @@ Service endpoint URL for `request`.
 function service_url(aws, request)
     endpoint = get(request, :endpoint, request[:service])
     region = "." * aws[:region]
+
     if endpoint == "iam" || (endpoint == "sdb" && region == ".us-east-1")
         region = ""
     end
-    string("https://", endpoint, region, ".amazonaws.com",
-           request[:resource])
+
+    return string("https://", endpoint, region, ".amazonaws.com", request[:resource])
 end
 
 
@@ -216,15 +205,11 @@ end
 Process request for AWS "query" service protocol.
 """
 function service_query(aws::AWSConfig; args...)
-
     request = Dict{Symbol,Any}(args)
-
     request[:verb] = "POST"
     request[:resource] = get(aws, :resource, "/")
     request[:url] = service_url(aws, request)
-    request[:headers] = Dict("Content-Type" =>
-                             "application/x-www-form-urlencoded; charset=utf-8")
-
+    request[:headers] = Dict("Content-Type" => "application/x-www-form-urlencoded; charset=utf-8")
     request[:query] = aws_args_dict(request[:args])
     request[:query]["Action"] = request[:operation]
     request[:query]["Version"] = request[:version]
@@ -232,12 +217,12 @@ function service_query(aws::AWSConfig; args...)
     if request[:service] == "iam"
         aws = merge(aws, Dict(:region => "us-east-1"))
     end
+
     if request[:service] in ["iam", "sts", "sqs", "sns"]
         request[:query]["ContentType"] = "JSON"
     end
 
-    request[:content] = HTTP.escapeuri(flatten_query(request[:service],
-                                       request[:query]))
+    request[:content] = HTTP.escapeuri(flatten_query(request[:service], request[:query]))
     do_request(merge(request, aws))
 end
 
@@ -248,9 +233,7 @@ end
 Process request for AWS "json" service protocol.
 """
 function service_json(aws::AWSConfig; args...)
-
     request = Dict{Symbol,Any}(args)
-
     request[:verb] = "POST"
     request[:resource] = "/"
     request[:url] = service_url(aws, request)
@@ -259,7 +242,7 @@ function service_json(aws::AWSConfig; args...)
         "X-Amz-Target" => "$(request[:target]).$(request[:operation])")
     request[:content] = json(aws_args_dict(request[:args]))
 
-    do_request(merge(request, aws))
+    return do_request(merge(request, aws))
 end
 
 
@@ -269,7 +252,6 @@ end
 Replace {Arg} placeholders in `request[:resource]` with arg values.
 """
 function rest_resource(request, args)
-
     r = request[:resource]
 
     for (k,v) in args
@@ -292,19 +274,16 @@ end
 Process request for AWS "rest_json" service protocol.
 """
 function service_rest_json(aws::AWSConfig; args...)
-
     request = Dict{Symbol,Any}(args)
     args = Dict(request[:args])
-
     request[:resource] = rest_resource(request, args)
     request[:url] = service_url(aws, request)
-
     request[:headers] = Dict{String,String}(get(args, "headers", []))
     delete!(args, "headers")
     request[:headers]["Content-Type"] = "application/json"
     request[:content] = json(aws_args_dict(args))
 
-    do_request(merge(request, aws))
+    return do_request(merge(request, aws))
 end
 
 
@@ -314,17 +293,13 @@ end
 Process request for AWS "rest_xml" service protocol.
 """
 function service_rest_xml(aws::AWSConfig; args...)
-
     request = Dict{Symbol,Any}(args)
     args = stringdict(request[:args])
-
     request[:headers] = Dict{String,String}(get(args, "headers", []))
     delete!(args, "headers")
     request[:content] = get(args, "Body", "")
     delete!(args, "Body")
-
     request[:resource] = rest_resource(request, args)
-
     query_str  = HTTP.escapeuri(args)
 
     if query_str  != ""
@@ -338,7 +313,7 @@ function service_rest_xml(aws::AWSConfig; args...)
     #FIXME deal with bucket prefix
     request[:url] = service_url(aws, request)
 
-    do_request(merge(request, aws))
+    return do_request(merge(request, aws))
 end
 
 
@@ -346,18 +321,21 @@ end
 Pretty-print AWSRequest dictionary.
 """
 function dump_aws_request(r::AWSRequest)
-
     action = r[:verb]
     name = r[:resource]
+
     if name == "/"
         name = ""
     end
+
     if haskey(r, :query) && haskey(r[:query], "Action")
         action = r[:query]["Action"]
     end
+
     if haskey(r[:headers], "X-Amz-Target")
         action = split(r[:headers]["X-Amz-Target"], ".")[end]
         q = JSON.parse(r[:content])
+
         for k in keys(q)
             if occursin(r"[^.]Name$", k)
                 name *= " "
@@ -365,6 +343,7 @@ function dump_aws_request(r::AWSRequest)
             end
         end
     end
+
     if haskey(r, :query)
         for k in keys(r[:query])
             if occursin(r"[^.]Name$", k)
@@ -373,12 +352,7 @@ function dump_aws_request(r::AWSRequest)
             end
         end
     end
-    println("$(r[:service]).$action $name")
 end
-
-
-include("sign.jl")
-
 
 """
     do_request(::AWSRequest)
@@ -386,16 +360,15 @@ include("sign.jl")
 Submit an API request, return the result.
 """
 function do_request(r::AWSRequest)
-
     response = nothing
 
     # Try request 3 times to deal with possible Redirect and ExiredToken...
     @repeat 3 try
-
         # Default headers...
         if !haskey(r, :headers)
             r[:headers] = Dict{String,String}()
         end
+
         r[:headers]["User-Agent"] = "AWSCore.jl/0.0.0"
         r[:headers]["Host"]       = HTTP.URI(r[:url]).host
 
@@ -414,7 +387,6 @@ function do_request(r::AWSRequest)
             r[:url] = HTTP.header(response, "Location")
             continue
         end
-
     catch e
         if e isa HTTP.StatusError
             e = AWSException(e)
@@ -551,20 +523,10 @@ function do_request(r::AWSRequest)
     return response.body
 end
 
-
 global debug_level = 0
 
 function set_debug_level(n)
     global debug_level = n
 end
 
-
-include("Services.jl")
-
-
 end # module AWSCore
-
-
-#==============================================================================#
-# End of file.
-#==============================================================================#

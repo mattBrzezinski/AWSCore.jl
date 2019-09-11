@@ -112,13 +112,7 @@ arn_match(s, n, p) = occursin(p, s) ||
                      (debug_level == 0 || @warn("Bad ARN $n: \"$s\""); false)
 
 is_arn_prefix(s) = arn_match(s, "prefix",   r"^arn$")
-is_partition(s)  = arn_match(s, "partiton", r"^aws[a-z-]*$")
+is_partition(s)  = arn_match(s, "partition", r"^aws[a-z-]*$")
 is_service(s)    = arn_match(s, "service",  r"^[a-zA-Z0-9\-]+$")
 is_region(s)     = arn_match(s, "region",   r"^([a-z]{2}-[a-z]+-\d)?$")
 is_account(s)    = arn_match(s, "account",  r"^(\d{12})?$")
-
-
-
-#==============================================================================#
-# End of file.
-#==============================================================================#

@@ -131,3 +131,21 @@ source_profile = valid-iam-profile
 ENV["AWS_PROFILE"] = "example-role-name"
 AWSCore.aws_config()
 ```
+
+## AWS4AuthLayer
+
+With the recent changes made to [HTTP.jl](https://github.com/JuliaWeb/HTTP.jl/pull/443) we can now insert custom layers
+into the HTTP Request stack. Below is an example of how to use the `AWS4AuthLayer` and inserting it into a stack.
+
+Historically the `AWS4AuthLayer` was placed inbetween the `MessageLayer` and `RetryLayer`. The Request chart can be
+found [here](https://github.com/JuliaWeb/HTTP.jl/blob/v0.8.6/src/HTTP.jl#L534).
+
+```julia
+using AWSCore
+using HTTP
+
+stack = HTTP.stack()
+
+# This will insert the AWS4AuthLayer before the RetryLayer
+insert(stack, RetryLayer, AWS4AuthLayer)
+```

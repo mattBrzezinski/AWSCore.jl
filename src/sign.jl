@@ -6,12 +6,10 @@
 # Copyright OC Technology Pty Ltd 2014 - All rights reserved
 #==============================================================================#
 
-
 using MbedTLS
 
 
 function sign!(r::AWSRequest, t = now(Dates.UTC))
-
     if r[:service] in ["sdb", "importexport"]
         sign_aws2!(r, t)
     else
@@ -22,24 +20,22 @@ end
 
 # Create AWS Signature Version 2 Authentication query parameters.
 # http://docs.aws.amazon.com/general/latest/gr/signature-version-2.html
-
 function sign_aws2!(r::AWSRequest, t)
-
     query = Dict{AbstractString,AbstractString}()
+
     for elem in split(r[:content], '&', keep=false)
         (n, v) = split(elem, "=")
         query[n] = HTTP.unescapeuri(v)
     end
 
-    r[:headers]["Content-Type"] =
-        "application/x-www-form-urlencoded; charset=utf-8"
+    r[:headers]["Content-Type"] = "application/x-www-form-urlencoded; charset=utf-8"
 
     creds = check_credentials(r[:creds])
     query["AWSAccessKeyId"] = creds.access_key_id
-    query["Expires"] = Dates.format(t + Dates.Second(120),
-                                   dateformat"yyyy-mm-dd\THH:MM:SS\Z")
+    query["Expires"] = Dates.format(t + Dates.Second(120), dateformat"yyyy-mm-dd\THH:MM:SS\Z")
     query["SignatureVersion"] = "2"
     query["SignatureMethod"] = "HmacSHA256"
+
     if creds.token != ""
         query["SecurityToken"] = creds.token
     end
@@ -48,11 +44,9 @@ function sign_aws2!(r::AWSRequest, t)
 
     u = HTTP.URI(r[:url])
     to_sign = "POST\n$(u.host)\n$(u.path)\n$(HTTP.escapeuri(query))"
+    secret = creds.aws_secret_key_key
 
-    secret = creds.secret_key
-    push!(query, "Signature" =>
-                  digest(MD_SHA256, to_sign, secret) |> base64encode |> strip)
-
+    push!(query, "Signature" => digest(MD_SHA256, to_sign, secret) |> base64encode |> strip)
     r[:content] = HTTP.escapeuri(query)
 end
 
@@ -60,9 +54,7 @@ end
 
 # Create AWS Signature Version 4 Authentication Headers.
 # http://docs.aws.amazon.com/general/latest/gr/signature-version-4.html
-
 function sign_aws4!(r::AWSRequest, t)
-
     # ISO8601 date/time strings for time of request...
     date = Dates.format(t,"yyyymmdd")
     datetime = Dates.format(t, dateformat"yyyymmdd\THHMMSS\Z")
@@ -73,6 +65,7 @@ function sign_aws4!(r::AWSRequest, t)
     creds = check_credentials(r[:creds])
     # Signing key generated from today's scope string...
     signing_key = string("AWS4", creds.secret_key)
+
     for element in scope
         signing_key = digest(MD_SHA256, element, signing_key)
     end
@@ -90,6 +83,7 @@ function sign_aws4!(r::AWSRequest, t)
         "x-amz-date"           => datetime,
         "Content-MD5"          => base64encode(digest(MD_MD5, r[:content]))
     ))
+
     if creds.token != ""
         r[:headers]["x-amz-security-token"] = creds.token
     end
@@ -104,13 +98,15 @@ function sign_aws4!(r::AWSRequest, t)
     query = Pair[k => query[k] for k in sort(collect(keys(query)))]
 
     # Create hash of canonical request...
-    canonical_form = string(r[:verb], "\n",
-                            r[:service] == "s3" ? uri.path
-                                                : HTTP.escapepath(uri.path), "\n",
-                            HTTP.escapeuri(query), "\n",
-                            join(sort(canonical_headers), "\n"), "\n\n",
-                            signed_headers, "\n",
-                            content_hash)
+    canonical_form = string(
+        r[:verb], "\n",
+        r[:service] == "s3" ? uri.path : HTTP.escapepath(uri.path), "\n",
+        HTTP.escapeuri(query), "\n",
+        join(sort(canonical_headers), "\n"), "\n\n",
+        signed_headers, "\n",
+        content_hash
+    )
+
     if debug_level > 2
         println("canonical_form:")
         println(canonical_form)
@@ -140,9 +136,3 @@ function sign_aws4!(r::AWSRequest, t)
         "Signature=$signature"
     )
 end
-
-
-
-#==============================================================================#
-# End of file.
-#==============================================================================#

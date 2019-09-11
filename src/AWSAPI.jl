@@ -9,18 +9,15 @@
 # Copyright OC Technology Pty Ltd 2017 - All rights reserved
 #==============================================================================#
 
-
 module AWSAPI
-
 
 using AWSMetadata
 using HTML2MD
 using DataStructures
 using JSON
 
-
 sdk_module_name(service_name) = "AWSSDK.$(service_name)"
-
+is_rest_service(service) = occursin(r"^rest", service["metadata"]["protocol"])
 
 """
     uncamel(s)
@@ -40,18 +37,16 @@ orjoin(words) = join(words, ", ", " or ")
 
 function is_simple_post_service(service)
     return (service["metadata"]["protocol"] in ["json", "query", "ec2"]
-        &&  service["metadata"]["endpointPrefix"] != "importexport")
+        && service["metadata"]["endpointPrefix"] != "importexport")
 end
-
-is_rest_service(service) = occursin(r"^rest", service["metadata"]["protocol"])
 
 
 function member_name(service, name, info)
-
     if haskey(info, "locationName")
         name = info["locationName"]
     else
         shape = service["shapes"][info["shape"]]
+
         if get(shape, "flattened", false)
             if shape["type"] == "list"
                 name = shape["member"]["shape"]
@@ -73,14 +68,13 @@ end
 
 
 function service_args(service, name)
-
     shape = service["shapes"][name]
     @assert shape["type"] == "structure"
 
     m = filter((n, i)::Pair -> (n in get(shape, "required", [])), shape["members"])
 
-    args = join(["$(member_name(service, name, info))="
-                 for (name, info) in m], ", ")
+    args = join(["$(member_name(service, name, info))=" for (name, info) in m], ", ")
+
     if length(m) < length(shape["members"])
         if args != ""
             args *= ", "
@@ -93,7 +87,6 @@ end
 
 
 function service_shape_doc(service, name, pad="", stack=[])
-
     shape = service["shapes"][name]
     t = shape["type"]
 
@@ -104,15 +97,11 @@ function service_shape_doc(service, name, pad="", stack=[])
     end
 
     push!(stack, name) ; try
-
     @assert pad != "" || t == "structure"
-
     padmore = pad * "    "
 
     if t == "structure"
-
         if pad == ""
-
             result = ""
 
             for (m, i) in shape["members"]
@@ -121,6 +110,7 @@ function service_shape_doc(service, name, pad="", stack=[])
                 d = html2md(get(i, "documentation", ""))
                 r = haskey(shape, "required") && m in shape["required"]
                 n = "$n = "
+
                 if !occursin("\n", s)
                     n = "$n$s"
                     s = ""
@@ -137,12 +127,14 @@ function service_shape_doc(service, name, pad="", stack=[])
         end
 
         members = []
+
         for (m, i) in shape["members"]
             n = member_name(service, m, i)
             s = service_shape_doc(service, i["shape"], padmore, stack)
             r = haskey(shape, "required") && m in shape["required"]
             push!(members, "\"$n\" => $(r ? "<required>" : "") $s")
         end
+
         if length(members) == 1
             return "[$(members[1])]"
         else
@@ -208,7 +200,6 @@ pretty(n, args...) = string(n)
 
 
 function service_operation(service, operation, info)
-
     @assert !haskey(info, "input") || isa(info["input"], OrderedDict)
     @assert !haskey(info, "output") || isa(info["output"], OrderedDict)
 
@@ -325,20 +316,18 @@ end
 
 
 function service_request_function_name(service)
-
     join(split(service["metadata"]["uid"], ['.', '-'])[1:end-3], "_")
 end
 
 
 function service_request_function(service)
-
     meta = service["metadata"]
-
     protocol = replace(meta["protocol"], "-" => "_")
+    name = service_request_function_name(service)
+
     if protocol == "ec2"
         protocol = "query"
     end
-    name = service_request_function_name(service)
 
     args = ["service      = \"$(meta["signingName"])\"",
             "version      = \"$(meta["apiVersion"])\""]
@@ -376,77 +365,59 @@ function service_request_function(service)
     else
         operation = ""
     end
-    push!(args,
-            "args         = args")
-
-"""
-function $name(aws::AWSConfig, $(verb)$(resource)$(operation)args=[])
-
-    AWSCore.service_$protocol(
-        aws;
-        $(join(args, ",\n        ")))
-end
-
-$name($(verb)$(resource)$(operation)args=[]) =
-    $name(default_aws_config(), $(verb)$(resource)$(operation)args)
-
-$name(a...; b...) = $name(a..., b)
-"""
+    push!(args, "args         = args")
 end
 
 
 function service_interface(service)
-
     meta = service["metadata"]
     m = meta["juliaModule"]
 
-    string(
-"""
-#==============================================================================#
-# $m.jl
-#
-# This file is generated from:
-# $(meta["sourceURL"])
-#==============================================================================#
+    return string(
+        """
+        #==============================================================================#
+        # $m.jl
+        #
+        # This file is generated from:
+        # $(meta["sourceURL"])
+        #==============================================================================#
 
-__precompile__()
+        __precompile__()
 
-module $m
+        module $m
 
-using AWSCore
-
-
-""",
-
-    (service_operation(service, o, i) for (o, i) in service["operations"])...,
-
-"""
+        using AWSCore
 
 
-end # module $m
+        """,
+
+            (service_operation(service, o, i) for (o, i) in service["operations"])...,
+
+        """
 
 
-#==============================================================================#
-# End of file
-#==============================================================================#
-"""
+        end # module $m
+
+
+        #==============================================================================#
+        # End of file
+        #==============================================================================#
+        """
     )
 end
 
 
 function service_api_reference_url(service, operation)
-
     uid = service["metadata"]["uid"]
-    "https://docs.aws.amazon.com/goto/WebAPI/$uid/$operation"
+    return "https://docs.aws.amazon.com/goto/WebAPI/$uid/$operation"
 end
 
 
 function service_documentation(service)
-
     meta = service["metadata"]
     m = meta["juliaModule"]
 
-    """
+    return """
     # AWSSDK.$m
 
     $(html2md(get(service, "documentation", "")))
@@ -467,7 +438,6 @@ function service_documentation(service)
 end
 
 function service_generate(name, definition)
-
     meta = definition["metadata"]
     println(meta["serviceFullName"])
     meta["juliaModule"] = name
@@ -483,7 +453,6 @@ end
 
 
 function generate_doc(services)
-
     doc = """
         using Documenter
         using AWSCore
@@ -517,9 +486,7 @@ end
 
 
 function generate_all()
-
     services = keys(AWSMetadata.service_list())
-
     request_functions = []
     sdk = []
 
@@ -532,61 +499,53 @@ function generate_all()
     end
 
     write(joinpath(@__DIR__, "Services.jl"),
-"""
-#==============================================================================#
-# Services.jl
-#
-# This file is generated by AWSAPI.jl from service decriptions at:
-# https://github.com/aws/aws-sdk-js/tree/master/apis
-#==============================================================================#
+        """
+        #==============================================================================#
+        # Services.jl
+        #
+        # This file is generated by AWSAPI.jl from service decriptions at:
+        # https://github.com/aws/aws-sdk-js/tree/master/apis
+        #==============================================================================#
 
-module Services
+        module Services
 
-using ..AWSCore
+        using ..AWSCore
 
-$(join(request_functions, "\n"))
+        $(join(request_functions, "\n"))
 
-end # module Services
+        end # module Services
 
-#==============================================================================#
-# End of file
-#==============================================================================#
-""")
+        #==============================================================================#
+        # End of file
+        #==============================================================================#
+        """
+    )
 
-    write(joinpath(@__DIR__, "..", "..", "AWSCoreDoc", "make.jl"),
-          generate_doc(services))
+    write(joinpath(@__DIR__, "..", "..", "AWSCoreDoc", "make.jl"), generate_doc(services))
 
     sdk_dir = joinpath(@__DIR__, "..", "..", "AWSSDK")
     src_path = joinpath(sdk_dir, "src", "AWSSDK.jl")
     mkpath(dirname(src_path))
         
     write(src_path,
-"""
-#==============================================================================#
-# AWSSDK.jl
-#
-# This file is generated by AWSAPI.jl from service decriptions at:
-# https://github.com/aws/aws-sdk-js/tree/master/apis
-#==============================================================================#
+        """
+        #==============================================================================#
+        # AWSSDK.jl
+        #
+        # This file is generated by AWSAPI.jl from service decriptions at:
+        # https://github.com/aws/aws-sdk-js/tree/master/apis
+        #==============================================================================#
 
-module AWSSDK
+        module AWSSDK
 
-$(join(sdk, "\n"))
+        $(join(sdk, "\n"))
 
-end # module AWSSDK
+        end # module AWSSDK
 
-#==============================================================================#
-# End of file
-#==============================================================================#
-""")
-
+        #==============================================================================#
+        # End of file
+        #==============================================================================#
+        """
+    )
 end
-
-
-
-
 end # module AWSAPI
-
-#==============================================================================#
-# End of file.
-#==============================================================================#

@@ -52,8 +52,8 @@ end
 List contents of `dirname` in the AWS JavaScript SDK on GitHub.
 """
 function aws_sdk_js_ls(dirname)
-
     cachename = dirname * ".contents"
+
     if cachehas(cachename)
         return json_parse(cacheget(cachename))
     end
@@ -75,10 +75,10 @@ end
 Get `filename` from the AWS JavaScript SDK on GitHub.
 """
 function aws_sdk_js(filename)
-
     if cachehas(filename * ".404")
         throw(HTTP.Response(404))
     end
+
     if cachehas(filename)
         return cacheget(filename)
     end
@@ -86,6 +86,7 @@ function aws_sdk_js(filename)
     url = "https://raw.githubusercontent.com/aws/aws-sdk-js/master/$filename"
     println("GET $url...")
     r = HTTP.get(url, github_headers)
+
     if r.status != 200
         if r.status == 404
             cacheput(filename * ".404", "")
@@ -108,7 +109,6 @@ _service_list = OrderedDict()
 Dict of services supported by the AWS JavaScript SDK.
 """
 function service_list()
-
     global _service_list
 
     if !isempty(_service_list)
@@ -127,7 +127,6 @@ function service_list()
     l = Pair[]
 
     for file in files
-
         # Parse prefix and version from filename...
         filename = join(split(file["name"], '.')[1:end-2],'.')
         filename = split(filename, '-')
@@ -144,7 +143,6 @@ function service_list()
 end
 
 
-
 """
     service_definition(service)
 
@@ -153,7 +151,6 @@ Get `service-2.json` file for `service`.
 e.g.  `service_definition(services()["SQS"])`
 """
 function service_definition(service)
-
     # Fetch ".normal.json" service definition from AWS JavaScript SDK...
     filename = "apis/$(service["prefix"])-$(service["version"]).normal.json"
     definition = json_parse(aws_sdk_js(filename))
@@ -215,7 +212,6 @@ end
 Print summary information about available services.
 """
 function service_summary()
-
     services = service_list()
 
     println("$(length(services)) services:")
@@ -226,7 +222,6 @@ function service_summary()
     sigs = Dict{String,Vector{String}}()
 
     for (name, service) in services
-
         sd = service_definition(service)
         meta = sd["metadata"]
         pr = meta["protocol"]
@@ -253,12 +248,4 @@ function service_summary()
         println("")
     end
 end
-
-
-
 end # module AWSMetadata
-
-
-#==============================================================================#
-# End of file.
-#==============================================================================#

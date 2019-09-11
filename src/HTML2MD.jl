@@ -11,16 +11,13 @@ module HTML2MD
 
 export html2md
 
-
 using NodeJS
 using HTTP
 
-const tcp_port = 34562
-
+const TCP_PORT = 34562
 server_process = nothing
 
 function start_node_server()
-
     global server_process
 
     @assert server_process == nothing
@@ -31,7 +28,7 @@ function start_node_server()
 
     server_process = run(`$(nodejs_cmd()) -e """
         const http = require('http')  
-        const port = $tcp_port
+        const port = $TCP_PORT
         const h2m = require('to-markdown')
 
         const requestHandler = (request, response) => {  
@@ -88,7 +85,6 @@ end
 
 
 function html2md(html)
-
     global server_process
 
     if server_process == nothing
@@ -99,19 +95,11 @@ function html2md(html)
     html = replace(html, "\$" => "\\\$")
     html = replace(html, "\"\"\"" => "\\\"\\\"\\\"")
 
-    md = String(HTTP.post("http://localhost:$tcp_port", [], html).body)
+    md = String(HTTP.post("http://localhost:$TCP_PORT", [], html).body)
 
     # Work around for https://github.com/domchristie/to-markdown/issues/181
     md = replace(md, r"([0-9])\\[.]" => s"\1.")
 
     return md
 end
-
-
-
 end # module HTML2MD
-
-
-#==============================================================================#
-# End of file.
-#==============================================================================#
