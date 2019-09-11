@@ -1,0 +1,1 @@
+Base.@deprecate copy!(dest::AWSCredentials, src::AWSCredentials) copyto!(dest, src)
